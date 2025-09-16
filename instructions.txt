@@ -1,0 +1,77 @@
+- Get a VPS
+- Download VS Code
+- Install MetaTrader 5 Terminal (Portable Mode Recommended):
+On the VPS, open a browser.
+1.Download MT5 from meta quotes.
+2.When installing, do NOT use the default location.
+3.Choose a custom folder like: C:\MQ45\MetaTrader5\
+4.Check “Yes” when it asks to run in portable mode, or install it manually by running in CMD: "C:\MQ45\Metatrader5\terminal64.exe" /portable or
+1.Right-click terminal64.exe or its shortcut → Create Shortcut
+2.Right-click the shortcut → Properties
+3.In the Target field, add /portable at the end:
+"C:\MQ45\Metatrader5\terminal64.exe" /portable
+Portable mode keeps config/data in the same folder. This makes it easier to manage multiple sessions or terminals later.
+
+- Install Python (check in terminal if python --version and pip --version exists, ensure it is added to PATH)
+and MetaTrader5 Package by running "pip install MetaTrader5" in terminal:
+1.Download Python from https://www.python.org/downloads/windows/
+2.Use Python 3.10 or newer.
+3.During setup, check “Add Python to PATH”.
+4.After install, open Command Prompt and run: pip install MetaTrader5
+✅ This gives you access to the MetaTrader5 Python API that connects to the installed terminal.
+
+- Install nodejs
+
+write the scripts in C:\MQ45\scripts
+write the api in C:\MQ45\api
+
+
+- if you can't access VPS from remote:
+Open "Windows Defender Firewall with Advanced Security"
+Create a New Inbound Rule: In the left pane → click Inbound Rules → In the right pane → click New Rule…
+Port type: Select Port → Click Next
+Protocol and Ports: Choose: TCP → Specific local ports: Type 3478 → Click Next
+Action: Choose Allow the connection → Click Next
+Profile: Leave all checked: Domain, Private,Public → Click Next
+Name Your Rule: Example: Node.js Port 3478 → Click Finish
+
+
+
+Create a .bat File
+This helps if you need to run the script with arguments, virtual env, or specific paths.
+Create a file called run_mt_script.bat with contents like:
+"@echo off
+cd C:\Path\To\Your\Script
+python verify_participation.py
+
+✅ Step 3: Set Up Windows Task Scheduler
+Open Task Scheduler (taskschd.msc from Run or Start Menu)
+Click "Create Basic Task…"
+Give it a name like Run MT5 Script Every 5 Mins
+Choose Daily
+Set the Start time (e.g., 00:00 or any time)
+Choose Repeat Task Every 5 minutes for a duration of 1 day (we’ll fine-tune this later)
+In "Action", select Start a Program
+For Program/script, enter:
+C:\Path\To\run_mt_script.bat
+(or use python.exe if you're passing script directly)
+Click Finish
+✅ Step 4: Fine-Tune the Trigger (Advanced Settings)
+After creating the task, double-click it in Task Scheduler
+Go to Triggers → Edit
+Set: Repeat task every: 5 minutes
+Set: For a duration of: 1 day
+Make sure Enabled is checked
+Go to Settings tab:
+Check Allow task to be run on demand
+Check Run task as soon as possible after a scheduled start is missed
+Optionally uncheck Stop the task if it runs longer than... (or increase duration)
+Click OK
+
+
+
+✅ Desktop Heap Exhaustion
+1. press win + R, type regedit, and press enter
+2. navigate to: HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\SubSystems
+3. Double click Windows on the right panel
+4. Look for: SharedSection=1024,20480,768 and change to SharedSection=10124,40960,2048
