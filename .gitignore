@@ -1,3 +1,4 @@
 Metatrader5/
 Terminals/
 **/node_modules/
+**/.env*
