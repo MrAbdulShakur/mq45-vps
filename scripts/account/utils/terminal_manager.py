@@ -142,6 +142,10 @@ class TerminalManager:
             logger.warning(f"❌ Failed to release terminal {terminal_id}: {e}")
             return False
         
+        
+    def get_balance_trades(history_deals: list):
+        return [d for d in history_deals if d["type"] == 2]
+    
 
     async def get_account_data(self, login, password, server):
         terminal = await TerminalManager.get_available_terminal()
@@ -221,7 +225,6 @@ class TerminalManager:
             return None
         
         history = [d._asdict() for d in history_deals() or []]
-        balance_history = TerminalManager.get_balance_trades(history)
         
         
         self.mt5.shutdown()
@@ -232,8 +235,7 @@ class TerminalManager:
             "message": "🟢 Account fetched successfully",
             "data": {
                 "account_info": account_info,
-                "balance_history": balance_history,
                 "positions": positions,
-                "history": history
+                "history_deals": history
             }
         }

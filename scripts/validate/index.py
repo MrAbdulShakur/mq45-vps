@@ -27,7 +27,7 @@ def parse_log(log_content):
 
     return errors, stats
 
-def compile_ea(metaeditor_path, source_file, log_file):
+def compile_ea(metaeditor_path, source_file, log_file, ex_file_path, raw_file_path):
     try:
         subprocess.run(
             [metaeditor_path, f"/compile:{source_file}", f"/log:{log_file}"],
@@ -57,7 +57,7 @@ def compile_ea(metaeditor_path, source_file, log_file):
         }
     finally:
         # cleanup: delete mq5 and log files
-        for f in [source_file, log_file]:
+        for f in [source_file, log_file, ex_file_path, raw_file_path]:
             try:
                 if os.path.exists(f):
                     os.remove(f)
@@ -74,6 +74,8 @@ if __name__ == "__main__":
     
     file_path = sys.argv[1]
     filename = sys.argv[2]
+    ex_file_path = sys.argv[3]
+    raw_file_path = sys.argv[4]
     
     log_file_dir = os.path.join(os.getcwd(), "logs")
     os.makedirs(log_file_dir, exist_ok=True)
@@ -83,6 +85,6 @@ if __name__ == "__main__":
     metaeditor_path = r"C:\MQ45\Metatrader5\MetaEditor64.exe"
 
     # Run compiler and return JSON result
-    result = compile_ea(metaeditor_path, file_path, log_file)
+    result = compile_ea(metaeditor_path, file_path, log_file, ex_file_path, raw_file_path)
     print(json.dumps(result))
 
