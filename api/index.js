@@ -69,7 +69,7 @@ app.post("/validate", upload.single("code_file"), async (req, res) => {
     });
 
     python.on("close", (code) => {
-      //   console.log(JSON.parse(output))
+        console.log(JSON.parse(output))
 
       try {
         if (errorOutput) {
