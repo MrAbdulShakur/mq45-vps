@@ -10,20 +10,17 @@ const upload = multer({ dest: 'uploads/' })
 
 
 app.get("/validate", async (req, res) => {
-  fs.rename(path.resolve("./uploads/9ce51225f4d3f238bcdad4938c1eaff1"), path.resolve("./uploads/9ce51225f4d3f238bcdad4938c1eaff1.mq5"), () => {
-
-  })
   res.json({ success: true });
 });
 
 app.post('/get_account_data', (req, res) => {
-  const { login, password, server } = req.body;
+  const { login, password, server, start_date, end_date } = req.body;
 
   if (!login || !password || !server)
     return res.status(400).json({ error: 'Missing fields' });
 
   const scriptPath = path.resolve("../scripts/account/index.py");
-  const process = spawn('python', [scriptPath, login, password, server]);
+  const process = spawn('python', [scriptPath, login, password, server, start_date, end_date]);
 
   let data = '';
   process.stdout.on('data', chunk => data += chunk.toString());

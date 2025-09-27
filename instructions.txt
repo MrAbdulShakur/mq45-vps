@@ -12,6 +12,8 @@ On the VPS, open a browser.
 "C:\MQ45\Metatrader5\terminal64.exe" /portable
 Portable mode keeps config/data in the same folder. This makes it easier to manage multiple sessions or terminals later.
 
+NB: Copy the server.dat file from the config folder from other sources to have broker list
+
 - Install Python (check in terminal if python --version and pip --version exists, ensure it is added to PATH)
 and MetaTrader5 Package by running "pip install MetaTrader5" in terminal:
 1.Download Python from https://www.python.org/downloads/windows/
@@ -33,7 +35,7 @@ Port type: Select Port → Click Next
 Protocol and Ports: Choose: TCP → Specific local ports: Type 3478 → Click Next
 Action: Choose Allow the connection → Click Next
 Profile: Leave all checked: Domain, Private,Public → Click Next
-Name Your Rule: Example: Node.js Port 3478 → Click Finish
+Name Your Rule: Example: Node.js Port 4756 → Click Finish
 
 
 
