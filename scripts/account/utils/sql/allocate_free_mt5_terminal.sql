@@ -24,7 +24,7 @@ begin
   update mt5_terminals
   set in_use = true,
       last_assigned = now()
-  where terminals.id = term.id;  -- ✅ Fully qualify the table column
+  where mt5_terminals.id = term.id;  -- ✅ Fully qualify the table column
 
   -- Return the allocated terminal
   return query select term.id, term.path;

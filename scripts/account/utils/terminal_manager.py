@@ -54,6 +54,7 @@ MARGIN_MODES = {
 }
 
 DELAY_FOR_ACCOUNT_FETCH = 0.25
+DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY = 0.25
 
 class TerminalManager:
     import MetaTrader5 as mt5
@@ -121,6 +122,8 @@ class TerminalManager:
         
 
     async def get_refined_account_data(self, login: str, password: str, server: str, start_date, end_date):
+        # Shut down any existing connection
+        self.mt5.shutdown()
         terminal = await TerminalManager.get_available_terminal()
 
         if not terminal.get("status"):
@@ -161,7 +164,7 @@ class TerminalManager:
                     "message": f"❌ Could not initailize trading account"
                 }
         
-        # await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH)
+        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH)
         
         # history deals
         history_deals = await self.get_history_deals(start_date, end_date)
@@ -195,16 +198,17 @@ class TerminalManager:
 
     async def get_account_info(self, open_trades, closed_trades, balance_trades):
         # logic to retry empty account_info
-        def account_info():
+        async def account_info():
             for attempt in range(self.retry_limit):
                 info = self.mt5.account_info()
                 if info:
                     return info
                 logger.info(f"Attempt {attempt + 1} failed for account_info")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
         
-        account_info = account_info()
+        account_info = await account_info()
         if not account_info:
             return None
 
@@ -267,7 +271,7 @@ class TerminalManager:
 
     async def get_history_deals(self, user_start_date = None, user_end_date = None):
         # logic to retry empty history deals
-        def history_deals():
+        async def history_deals():
             start_date = ""
             end_date = ""
 
@@ -283,11 +287,12 @@ class TerminalManager:
                 if deals:
                     return deals
                 logger.info(f"Attempt {attempt + 1} failed for get_history_deals")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
         
 
-        deals = history_deals()
+        deals = await history_deals()
         
         if not deals:
             logger.warning("deals -> ", self.mt5.last_error())
@@ -298,16 +303,17 @@ class TerminalManager:
 
     async def get_open_trades(self):
         # logic to retry empty open trades
-        def get_positions():
+        async def get_positions():
             for attempt in range(self.retry_limit):
                 positions = self.mt5.positions_get()
                 if positions:
                     return positions
                 logger.info(f"Attempt {attempt + 1} failed for get_open_trades")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
         
-        positions = get_positions()
+        positions = await get_positions()
 
         if not positions:
             logger.warning("positions -> ", self.mt5.last_error())
@@ -354,16 +360,17 @@ class TerminalManager:
 
             if self.mt5.symbol_select(symbol, True):
                 # logic to retry empty symbol info
-                def get_symbols():
+                async def get_symbols():
                     for attempt in range(self.retry_limit):
                         info = self.mt5.symbol_info(symbol)
                         if info:
                             return info
                         logger.info(f"Attempt {attempt + 1} failed for get_symbol_info")
+                        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
                     
                     return None
         
-                info = get_symbols()
+                info = await get_symbols()
                 if info:
                     symbol_dict = info._asdict()
                     new_symbol_info = {
@@ -460,6 +467,7 @@ class TerminalManager:
     
 
     async def get_raw_account_data(self, login, password, server):
+        self.mt5.shutdown()
         terminal = await TerminalManager.get_available_terminal()
         
         if not terminal.get("status"):
@@ -500,30 +508,33 @@ class TerminalManager:
                     "message": f"❌ Could not initailize trading account"
                 } 
         
-        def account_info():
+        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH)
+
+        async def account_info():
             for attempt in range(self.retry_limit):
                 info = self.mt5.account_info()
                 if info:
                     return info
                 logger.info(f"Attempt {attempt + 1} failed for account_info")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
-        account_info = account_info()._asdict()
+        account_info = await account_info()._asdict()
         
-        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH)
         
-        def get_positions():
+        async def get_positions():
             for attempt in range(self.retry_limit):
                 positions = self.mt5.positions_get()
                 if positions:
                     return positions
                 logger.info(f"Attempt {attempt + 1} failed for get_positions")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
-        positions = [p._asdict() for p in get_positions() or []]
+        positions = [p._asdict() for p in await get_positions() or []]
 
 
-        def history_deals():
+        async def history_deals():
             end_date = datetime.now()
             start_date = end_date - relativedelta(years=1)
         
@@ -533,10 +544,11 @@ class TerminalManager:
                 if history:
                     return history
                 logger.info(f"Attempt {attempt + 1} failed for history_deals")
+                await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
             
             return None
         
-        history = [d._asdict() for d in history_deals() or []]
+        history = [d._asdict() for d in await history_deals() or []]
         
         
         self.mt5.shutdown()
