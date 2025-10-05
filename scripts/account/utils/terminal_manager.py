@@ -53,7 +53,7 @@ MARGIN_MODES = {
     2: "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING"
 }
 
-DELAY_FOR_ACCOUNT_FETCH = 0.25
+DELAY_FOR_ACCOUNT_FETCH = 0
 DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY = 0.25
 
 class TerminalManager:
@@ -213,7 +213,8 @@ class TerminalManager:
             return None
 
         account_info_dict = account_info._asdict()
-        starting_balance = sum(t["profit"] for t in balance_trades)
+        deposits = sum(t["profit"] for t in balance_trades if t["profit"] >= 0)
+        withdrawals = sum(t["profit"] for t in balance_trades if t["profit"] < 0)
             
         total_trades = sum([len(open_trades), len(closed_trades)])
 
@@ -229,26 +230,30 @@ class TerminalManager:
         open_trades_profit = sum([d["profit"] for d in open_trades])
         total_profit = sum([closed_trades_profit, open_trades_profit])
         
-        equity = sum([starting_balance, total_profit])
-        gain = ((equity - starting_balance) /
-                starting_balance) * 100 if starting_balance > 0 else 0
-        
+        balance = account_info_dict["balance"]
+
+        gain = (sum([d["gain"] for d in closed_trades]) / len(closed_trades)) if len(closed_trades) > 0 else 0
+
+        swap = sum([d["swap"] for d in closed_trades]) + sum([d["swap"] for d in open_trades])
 
         return {
-            "balance": sum([starting_balance, closed_trades_profit]),
+            "balance": balance,
             "leverage": account_info_dict["leverage"],
+            "login": account_info_dict["login"],
             "trade_mode": TRADE_MODES.get(account_info_dict["trade_mode"], account_info_dict["trade_mode"]),
             "currency": account_info_dict["currency"],
-            "equity": equity,
-            "profit": total_profit,
+            "equity": account_info_dict["equity"],
+            "swap": swap,
+            "profit": (balance - (withdrawals)) - deposits,
             "gain": gain,
-            "starting_balance": starting_balance,
+            "deposits": deposits,
+            "withdrawals": withdrawals,
             "trades": total_trades,
             "average_win": average_win,
             "margin_mode": MARGIN_MODES.get(account_info_dict["margin_mode"], account_info_dict["margin_mode"]),
             "won_trades_percent": won_trades_percent,
             "pips": round(total_pips / 1000, 2),
-            "commission_blocked": 0,
+            "commission_blocked": account_info_dict["commission_blocked"],
             "name": account_info_dict["name"],
             "company": account_info_dict["company"],
             "limit_orders": account_info_dict["limit_orders"],
@@ -277,11 +282,11 @@ class TerminalManager:
 
             if user_start_date and user_end_date:
                 start_date = datetime.fromisoformat(user_start_date)
-                end_date = datetime.fromisoformat(user_end_date)
+                end_date = datetime.fromisoformat(user_end_date) + relativedelta(days=1)
             else:
                 end_date = datetime.now()
-                start_date = end_date - relativedelta(years=1)
-        
+                start_date = (end_date - relativedelta(years=1)) + relativedelta(days=1)
+
             for attempt in range(self.retry_limit):
                 deals = self.mt5.history_deals_get(start_date, end_date)
                 if deals:
@@ -299,6 +304,55 @@ class TerminalManager:
             return []
 
         return [d._asdict() for d in deals]
+
+
+    async def get_symbol_info(self, symbol):
+        try:
+            existing_symbol_info = self.symbols_info.get(symbol, False)
+            
+            if existing_symbol_info:
+                return existing_symbol_info
+
+            if self.mt5.symbol_select(symbol, True):
+                # logic to retry empty symbol info
+                async def get_symbols():
+                    for attempt in range(self.retry_limit):
+                        info = self.mt5.symbol_info(symbol)
+                        if info:
+                            return info
+                        logger.info(f"Attempt {attempt + 1} failed for get_symbol_info")
+                        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
+                    
+                    return None
+        
+                info = await get_symbols()
+                
+                if info:
+                    symbol_dict = info._asdict()
+                    new_symbol_info = {
+                        "trade_contract_size": symbol_dict.get("trade_contract_size", 0)
+                    }
+                    
+                    self.symbols_info[symbol] = new_symbol_info
+                    
+                    return new_symbol_info
+
+            logger.warning("symbol -> ", self.mt5.last_error())
+        except Exception as e:
+            logger.warning("❌ Failed to get symbol data")
+
+        return
+
+    def get_trade_change_percent(contract_size, volume, open_price, profit):        
+        # Trade notional value = volume (lots) × contract size × open price
+        notional_value = volume * contract_size * open_price
+
+        if notional_value == 0:
+            return 0.0
+        
+        # Change % = profit ÷ notional_value × 100
+        change_percent = (profit / notional_value) * 100
+        return change_percent
 
 
     async def get_open_trades(self):
@@ -329,10 +383,17 @@ class TerminalManager:
                         open_time).total_seconds() / 60
             gain = ((open_trade["profit"] / (open_trade["price_open"] *
                     open_trade["volume"])) * 100) if open_trade["price_open"] > 0 else 0
+            
+            symbol = open_trade["symbol"]
+            symbol_info = await self.get_symbol_info(symbol)
+
+            contract_size = symbol_info.get("trade_contract_size", 0)
+            
+            change_percent = TerminalManager.get_trade_change_percent(contract_size, open_trade["volume"], open_trade["price_open"], open_trade["profit"])
 
             open_trade_data = {
                 "trade_id": str(open_trade["identifier"]),
-                "symbol": open_trade["symbol"],
+                "symbol": symbol,
                 "volume": open_trade["volume"],
                 "magic": open_trade["magic"],
                 "reason": open_trade["reason"],
@@ -343,6 +404,7 @@ class TerminalManager:
                 "profit": open_trade["profit"],
                 "stop_loss": open_trade["sl"],
                 "take_profit": open_trade["tp"],
+                "change_percent": change_percent,
                 "gain": gain,
                 "duration_in_minutes": round(duration),
                 "type": "BUY" if open_trade["type"] == 0 else "SELL",
@@ -352,109 +414,106 @@ class TerminalManager:
 
         return result
 
-    async def get_symbol_info(self, symbol):
-        try:
-            existing_symbol_info = self.symbols_info.get(symbol, False)
-            if existing_symbol_info:
-                return existing_symbol_info
-
-            if self.mt5.symbol_select(symbol, True):
-                # logic to retry empty symbol info
-                async def get_symbols():
-                    for attempt in range(self.retry_limit):
-                        info = self.mt5.symbol_info(symbol)
-                        if info:
-                            return info
-                        logger.info(f"Attempt {attempt + 1} failed for get_symbol_info")
-                        await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH_RE_ENTRY)
-                    
-                    return None
-        
-                info = await get_symbols()
-                if info:
-                    symbol_dict = info._asdict()
-                    new_symbol_info = {
-                        "trade_contract_size": symbol_dict.get("trade_contract_size", 0)
-                    }
-                    self.symbols_info[symbol] = new_symbol_info
-                    return new_symbol_info
-
-            logger.warning("symbol -> ", self.mt5.last_error())
-        except Exception as e:
-            logger.warning("❌ Failed to get symbol data")
-
-        return
-
-
+    
     async def get_closed_trades(self, history_deals: list):
-        # only open and closed positions
-        trades = [d for d in history_deals if d["type"] != 2]
-        trades_by_position = defaultdict(dict)
+        # group deals by position_id (only positive position ids)
+        trades_by_position = defaultdict(list)
+        for d in history_deals:
+            pid = d.get("position_id", 0)
+            if pid and pid > 0:
+                trades_by_position[pid].append(d)
+
         result = []
-        
-        for trade in trades:
-            position_id = trade["position_id"]
-            if trade["entry"] == 0:
-                trades_by_position[position_id]["open"] = trade
-            elif trade["entry"] == 1:
-                trades_by_position[position_id]["close"] = trade
 
-        for position_id, trade_pair in trades_by_position.items():
-            open_trade = trade_pair.get("open")
-            close_trade = trade_pair.get("close")
-
-            if not open_trade or not close_trade:
+        for position_id, deals in trades_by_position.items():
+            # split into opens, closes and others
+            open_deals = [d for d in deals if d.get("entry") == 0]
+            close_deals = [d for d in deals if d.get("entry") == 1]
+            if not open_deals or not close_deals:
+                # skip if not a fully opened & closed position (you can change this behavior)
                 continue
 
-            symbol = close_trade["symbol"]
+            # totals and VWAPs
+            total_open_vol = sum(d.get("volume", 0.0) for d in open_deals)
+            total_close_vol = sum(d.get("volume", 0.0) for d in close_deals) or total_open_vol
 
-            open_time = datetime.fromtimestamp(
-                open_trade["time_msc"]/1000, tz=timezone.utc)
-            close_time = datetime.fromtimestamp(
-                close_trade["time_msc"]/1000, tz=timezone.utc)
-            duration_minutes = (close_time - open_time).total_seconds() / 60
+            # VWAP open price (weighted by volume)
+            open_price_vwap = sum(d.get("price", 0.0) * d.get("volume", 0.0) for d in open_deals) / total_open_vol
+            close_price_vwap = sum(d.get("price", 0.0) * d.get("volume", 0.0) for d in close_deals) / total_close_vol
 
-            direction = TRADE_DEAL_TYPES.get(open_trade["type"], "UNKNOWN")
-            if direction == "BUY":
-                pips = round(
-                    (close_trade["price"] - open_trade["price"]) * 10**5, 2)
-                price_diff = close_trade["price"] - open_trade["price"]
-            else:  # SELL
-                pips = round(
-                    (open_trade["price"] - close_trade["price"]) * 10**5, 2)
-                price_diff = open_trade["price"] - close_trade["price"]
+            # aggregate fees/swaps/commissions and raw profit
+            total_commission = sum(d.get("commission", 0.0) for d in deals)
+            total_swap = sum(d.get("swap", 0.0) for d in deals)
+            total_fee = sum(d.get("fee", 0.0) for d in deals)
+            total_profit_only = sum(d.get("profit", 0.0) for d in deals)
 
-            entry_value = open_trade["price"] * open_trade["volume"]
-            gain = (close_trade["profit"] / entry_value *
-                    100) if entry_value > 0 else 0
+            # terminal-style net profit for the position (what the terminal shows)
+            profit_net = total_profit_only + total_swap + total_commission + total_fee
 
+            # times (use time_msc when available)
+            open_time_ms = min(d.get("time_msc", d.get("time", 0) * 1000) for d in open_deals)
+            close_time_ms = max(d.get("time_msc", d.get("time", 0) * 1000) for d in close_deals)
+            open_time = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc)
+            close_time = datetime.fromtimestamp(close_time_ms / 1000.0, tz=timezone.utc)
+            duration_minutes = (close_time - open_time).total_seconds() / 60.0
+
+            # direction & representative fields (take from first open deal)
+            rep_open = open_deals[0]
+            rep_close = close_deals[-1]
+            direction = TRADE_DEAL_TYPES.get(rep_open.get("type"), "UNKNOWN")
+            symbol = rep_open.get("symbol")
+
+            # symbol info (await your existing symbol lookup)
             symbol_info = await self.get_symbol_info(symbol)
+            contract_size = symbol_info.get("trade_contract_size", 1)
+            digits = symbol_info.get("digits", 5)
 
-            contract_size = symbol_info.get(
-                symbol, {}).get("trade_contract_size", 0)
-            market_value = price_diff * open_trade["volume"] * contract_size
+            # price diff, market value and pips
+            if direction == "BUY":
+                price_diff = close_price_vwap - open_price_vwap
+            else:
+                price_diff = open_price_vwap - close_price_vwap
 
+            market_value = price_diff * total_open_vol * contract_size
+
+            # pip calculation: 1 pip = 10^(digits-1) for most instruments (works for XAU with digits=3 -> *100)
+            pip_multiplier = 10 ** (max(digits - 1, 0))
+            pips = round(price_diff * pip_multiplier, 2)
+
+            # gain: profit relative to position notional (you can change denominator if you want gain vs account)
+            entry_notional = open_price_vwap * total_open_vol * contract_size
+            gain = (profit_net / entry_notional * 100) if entry_notional > 0 else 0.0
+
+            # change percent using your TerminalManager helper (pass profit_net so it reflects full P/L)
+            change_percent = TerminalManager.get_trade_change_percent(
+                contract_size, total_open_vol, open_price_vwap, profit_net
+            )
+
+            # build the exact shape you were previously returning, but with aggregated values
             closed_trade_data = {
                 "trade_id": str(position_id),
                 "symbol": symbol,
                 "type": direction,
-                "volume": open_trade["volume"],
-                "entry": open_trade["entry"],
-                "magic": open_trade["magic"],
-                "reason": open_trade["reason"],
-                "commission": open_trade["commission"],
-                "swap": open_trade["swap"],
-                "fee": open_trade["fee"],
-                "profit": close_trade["profit"],
+                "volume": total_open_vol,
+                "entry": rep_open.get("entry"),
+                "magic": rep_open.get("magic"),
+                "reason": rep_open.get("reason"),
+                # return aggregated commission/swap/fee for the position
+                "commission": total_commission,
+                "swap": total_swap,
+                "fee": total_fee,
+                # profit is the net P/L (profit + swap + commission + fee) to match terminal
+                "profit": profit_net,
                 "open_time": open_time.isoformat(),
                 "close_time": close_time.isoformat(),
-                "open_price": open_trade["price"],
-                "close_price": close_trade["price"],
+                "open_price": open_price_vwap,
+                "close_price": close_price_vwap,
                 "market_value": market_value,
-                "pips": round(pips / 1000, 2),
+                "pips": pips,
                 "gain": gain,
+                "change_percent": change_percent,
                 "duration_in_minutes": round(duration_minutes),
-                "success": "won" if close_trade["profit"] > 0 else "lost"
+                "success": "won" if profit_net > 0 else "lost"
             }
 
             result.append(closed_trade_data)
