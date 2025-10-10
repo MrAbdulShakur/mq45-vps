@@ -121,7 +121,7 @@ class TerminalManager:
             return False
         
 
-    async def get_refined_account_data(self, login: str, password: str, server: str, start_date, end_date):
+    async def get_refined_account_data(self, login: str, password: str, server: str):
         # Shut down any existing connection
         self.mt5.shutdown()
         terminal = await TerminalManager.get_available_terminal()
@@ -167,7 +167,7 @@ class TerminalManager:
         await asyncio.sleep(DELAY_FOR_ACCOUNT_FETCH)
         
         # history deals
-        history_deals = await self.get_history_deals(start_date, end_date)
+        history_deals = await self.get_history_deals()
         
         # balance trades
         balance_trades = TerminalManager.get_balance_trades(history_deals)
@@ -274,18 +274,11 @@ class TerminalManager:
             "liabilities": account_info_dict["liabilities"]
         }
 
-    async def get_history_deals(self, user_start_date = None, user_end_date = None):
+    async def get_history_deals(self):
         # logic to retry empty history deals
         async def history_deals():
-            start_date = ""
-            end_date = ""
-
-            if user_start_date and user_end_date:
-                start_date = datetime.fromisoformat(user_start_date)
-                end_date = datetime.fromisoformat(user_end_date) + relativedelta(days=1)
-            else:
-                end_date = datetime.now()
-                start_date = (end_date - relativedelta(years=1)) + relativedelta(days=1)
+            end_date = datetime.now() + relativedelta(days=1)
+            start_date = (end_date - relativedelta(years=3)) + relativedelta(days=1)
 
             for attempt in range(self.retry_limit):
                 deals = self.mt5.history_deals_get(start_date, end_date)
@@ -594,8 +587,8 @@ class TerminalManager:
 
 
         async def history_deals():
-            end_date = datetime.now()
-            start_date = end_date - relativedelta(years=1)
+            end_date = datetime.now() + relativedelta(days=1)
+            start_date = (end_date - relativedelta(years=3)) + relativedelta(days=1)
         
             for attempt in range(self.retry_limit):
                 history = self.mt5.history_deals_get(
